@@ -11,7 +11,7 @@
 
 ## Purpose
 
-Cession federated remote: screens, widgets, record tabs, and transaction composition. Primary-book ceded reinsurance contracts, cession rules, FS-RI hand-off, and recoverables.
+Cession federated remote: screens, widgets, record tabs, and transaction composition. Direct-book ceded reinsurance contracts, cession rules, FS-RI hand-off, and recoverables.
 
 ## Responsibilities
 
