@@ -30,6 +30,26 @@ Cession federated remote: screens, widgets, record tabs, and transaction composi
 - Security scan and SBOM
 - Build and publish
 
+## Implemented slice
+
+React 19 and Webpack 5 Module Federation remote. The container is `eia_cession`, exposes `./App`,
+runs on port `3006`, and proxies `/api` to the domain service at `http://localhost:8092`. The
+application uses an async bootstrap (`index.jsx` loads `bootstrap.jsx`) so React is shared correctly.
+The workbench shows the `DIRECT book` header, lists cession cases, creates cessions, and drives the
+SPEC 11.9.3 status lifecycle.
+
+## Local run
+
+```powershell
+npm install
+npm start        # http://localhost:3006
+npm run build
+npm test         # Playwright, API mocked
+```
+
+`@swc/core` is pinned to exactly `1.10.7` because later releases fail SWC cache validation on the
+reference Windows machine.
+
 ## Notes
 
 No business logic; all actions go through the domain service.
