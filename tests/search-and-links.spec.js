@@ -234,7 +234,7 @@ test('policy and cession contract pickers submit the selected UUIDs', async ({ p
   await mockPickers(page, pickerRequests);
 
   await page.goto('/');
-  await page.getByRole('button', { name: 'Create cession' }).click();
+  await page.locator('header').getByRole('button', { name: 'Create cession' }).click();
   const dialog = page.getByRole('dialog');
 
   await dialog.getByPlaceholder('Search policy number or product…').fill('POL-2026');
@@ -302,3 +302,4 @@ test('overview carries policy/contract cross-links and the why-it-matters contex
   await expect(page.locator('#cession-panel-handoff')).toBeVisible();
   await expect(page.getByRole('heading', { name: 'FS-RI hand-off', exact: true })).toBeVisible();
 });
+
