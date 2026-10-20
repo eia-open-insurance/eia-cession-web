@@ -35,8 +35,11 @@ Cession federated remote: screens, widgets, record tabs, and transaction composi
 React 19 and Webpack 5 Module Federation remote. The container is `eia_cession`, exposes `./App`,
 runs on port `3006`, and proxies `/api` to the domain service at `http://localhost:8092`. The
 application uses an async bootstrap (`index.jsx` loads `bootstrap.jsx`) so React is shared correctly.
-The workbench shows the `DIRECT book` header, lists cession cases, creates cessions, and drives the
-SPEC 11.9.3 status lifecycle.
+The workbench follows the shared EIA operational record design: a `Cession` page head with the
+`DIRECT book` badge, a cession queue beside the record panel, ceded premium/loss and FS-RI summary
+cards, and Overview, FS-RI Hand-off, and Status History tabs. Cessions are created in a modal; the
+lifecycle and the FS-RI hand-off (including its reference, status, timestamp, and last error) remain
+wired to the domain API. The canonical `ui.css` is loaded through `style-loader` and `css-loader`.
 
 ## Local run
 
