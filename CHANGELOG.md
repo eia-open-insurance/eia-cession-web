@@ -14,12 +14,23 @@ The format is based on Keep a Changelog and the project uses Semantic Versioning
 - DIRECT-book cession workbench with create, list, and lifecycle actions.
 - `/api` proxy to the domain service and Playwright test with a mocked API.
 - FS-RI hand-off reference, status, timestamp, and last-error fields on the record.
+- Event-derived **Activity** tab: selecting a cession fetches
+  `GET /api/v1/events/aggregate/{cessionId}?limit=50` with the tenant header and
+  renders a newest-first timeline of timestamp, readable event type, event
+  status, version, and the payload facts a cession user needs — the case status
+  transition, FS-RI hand-off reference/status/contract, ceded premium and loss,
+  and the rejection or FS-RI error. The card carries its own loading, error,
+  empty, and refresh states plus an event-derived/append-only/source-of-truth
+  note, so a slow or unavailable event service never blocks the record.
+- Playwright coverage for the aggregate path and tenant header, newest-first
+  ordering and rendering, the empty state, a contained 503, the cession payload
+  facts, refetching on selection, and the card refresh.
 
 ### Changed
 
 - Adopted the shared EIA operational record design: page head, DIRECT queue, record
-  panel, summary grid, Overview / FS-RI Hand-off / Status History tabs, and a
-  Create cession modal.
+  panel, summary grid, and the Overview / FS-RI Hand-off / Status History /
+  Activity tabs, plus a Create cession modal.
 - Copied the canonical `ui.css` and added `style-loader` / `css-loader` while
   keeping `@swc/core` pinned to 1.10.7.
 - Extended Playwright coverage for the record shell, modal create, lifecycle, and

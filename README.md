@@ -37,9 +37,12 @@ runs on port `3006`, and proxies `/api` to the domain service at `http://localho
 application uses an async bootstrap (`index.jsx` loads `bootstrap.jsx`) so React is shared correctly.
 The workbench follows the shared EIA operational record design: a `Cession` page head with the
 `DIRECT book` badge, a cession queue beside the record panel, ceded premium/loss and FS-RI summary
-cards, and Overview, FS-RI Hand-off, and Status History tabs. Cessions are created in a modal; the
-lifecycle and the FS-RI hand-off (including its reference, status, timestamp, and last error) remain
-wired to the domain API. The canonical `ui.css` is loaded through `style-loader` and `css-loader`.
+cards, and Overview, FS-RI Hand-off, Status History, and Activity tabs. Cessions are created in a
+modal; the lifecycle and the FS-RI hand-off (including its reference, status, timestamp, and last
+error) remain wired to the domain API. The Activity tab reads the append-only event stream from
+`GET /api/v1/events/aggregate/{cessionId}?limit=50` and renders the case status, version, FS-RI
+hand-off, and ceded-amount facts as an event-derived timeline. The canonical `ui.css` is loaded
+through `style-loader` and `css-loader`.
 
 ## Local run
 

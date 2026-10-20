@@ -1,6 +1,8 @@
 import React, { useEffect, useRef, useState } from 'react';
 import './ui.css';
 import EntityPicker from './EntityPicker.jsx';
+import ActivityPanel from './ActivityPanel.jsx';
+import { activityEndpoint, activityItems } from './activity.js';
 import { navigate, recordHref } from './navigation.js';
 
 const TENANT = '11111111-1111-7111-8111-111111111111';
@@ -34,7 +36,8 @@ const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{
 const TABS = [
   { id: 'overview', label: 'Overview' },
   { id: 'handoff', label: 'FS-RI Hand-off' },
-  { id: 'history', label: 'Status History' }
+  { id: 'history', label: 'Status History' },
+  { id: 'activity', label: 'Activity' }
 ];
 
 const STATUS_TONES = [
@@ -307,6 +310,8 @@ export default function App() {
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
   const [queueFilter, setQueueFilter] = useState('');
+  const [activity, setActivity] = useState({ items: [], loading: false, error: '' });
+  const [activityNonce, setActivityNonce] = useState(0);
 
   const cessionsRef = useRef([]);
   const applyingUrlRef = useRef(false);
@@ -451,6 +456,35 @@ export default function App() {
     setHandoffContractNumber('');
   }, [selectedId]);
 
+  /**
+   * Event-derived activity for the selected cession. The fetch starts when the
+   * record is selected and owns its own loading/error state, so a slow or
+   * unavailable event service never blocks the cession record.
+   *
+   * Events come from `GET /api/v1/events/aggregate/{cessionId}?limit=50` with the
+   * tenant header; they are facts that already happened, not editable state.
+   */
+  useEffect(() => {
+    if (!selectedCessionId) {
+      setActivity({ items: [], loading: false, error: '' });
+      return undefined;
+    }
+    let cancelled = false;
+    setActivity({ items: [], loading: true, error: '' });
+    request(activityEndpoint(selectedCessionId))
+      .then((payload) => {
+        if (cancelled) return;
+        setActivity({ items: activityItems(payload), loading: false, error: '' });
+      })
+      .catch((cause) => {
+        if (cancelled) return;
+        setActivity({ items: [], loading: false, error: cause.message });
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedCessionId, activityNonce]);
+
   useEffect(() => {
     if (!createOpen) return undefined;
     const onKeyDown = (event) => {
@@ -495,11 +529,16 @@ export default function App() {
 
   async function refresh() {
     setError('');
+    setActivityNonce((value) => value + 1);
     try {
       await load();
     } catch (cause) {
       setError(cause.message);
     }
+  }
+
+  function refreshActivity() {
+    setActivityNonce((value) => value + 1);
   }
 
   function openCreate() {
@@ -540,6 +579,7 @@ export default function App() {
       setForm(EMPTY_FORM);
       setCreateOpen(false);
       await load();
+      setActivityNonce((value) => value + 1);
       if (created?.id) {
         setSelectedId(created.id);
         writeUrl({ record: created.id });
@@ -568,6 +608,7 @@ export default function App() {
         body: JSON.stringify({ targetStatus: transitionTarget })
       });
       await load();
+      setActivityNonce((value) => value + 1);
       if (updated?.id) setSelectedId(updated.id);
       setNotice(`Cession moved to ${humanize(updated?.status || transitionTarget)}.`);
       setTransitionTarget('');
@@ -593,6 +634,7 @@ export default function App() {
         body: JSON.stringify(body)
       });
       await load();
+      setActivityNonce((value) => value + 1);
       if (updated?.id) setSelectedId(updated.id);
       setHandoffContractNumber('');
       setNotice(
@@ -1048,6 +1090,15 @@ export default function App() {
               )}
 
               {activeTab === 'history' && <StatusHistory cession={selectedCession} />}
+
+              {activeTab === 'activity' && (
+                <ActivityPanel
+                  items={activity.items}
+                  loading={activity.loading}
+                  error={activity.error}
+                  onRefresh={refreshActivity}
+                />
+              )}
             </>
           )}
         </section>
