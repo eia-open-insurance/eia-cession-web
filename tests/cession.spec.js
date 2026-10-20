@@ -99,6 +99,48 @@ test('renders the Cession operational record and creates a DIRECT cession', asyn
     });
   });
 
+  await page.route('**/api/v1/policies/search**', async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        query: 'POL',
+        limit: 8,
+        items: [
+          {
+            id: '33333333-3333-7333-8333-333333333333',
+            type: 'POLICY',
+            label: 'POL-2026-0001',
+            secondary: 'GL · ACTIVE',
+            status: 'ACTIVE',
+            href: '/policy?record=33333333-3333-7333-8333-333333333333'
+          }
+        ]
+      })
+    });
+  });
+
+  await page.route('**/api/v1/contracts/search**', async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        query: 'CTR',
+        limit: 8,
+        items: [
+          {
+            id: '44444444-4444-7444-8444-444444444444',
+            type: 'CONTRACT',
+            label: 'CTR-2026-0001',
+            secondary: 'Meridian Re · ASSUMED',
+            status: 'BOUND',
+            href: '/contract?record=44444444-4444-7444-8444-444444444444'
+          }
+        ]
+      })
+    });
+  });
+
   await page.goto('/');
 
   await expect(page.getByRole('heading', { name: 'Cession', exact: true })).toBeVisible();
@@ -120,8 +162,18 @@ test('renders the Cession operational record and creates a DIRECT cession', asyn
   await page.getByRole('button', { name: 'Create cession' }).click();
   const dialog = page.getByRole('dialog');
   await expect(dialog).toBeVisible();
-  await dialog.getByLabel('Policy ID').fill('33333333-3333-7333-8333-333333333333');
-  await dialog.getByLabel('Ceded contract ID').fill('44444444-4444-7444-8444-444444444444');
+  await dialog.getByPlaceholder('Search policy number or product…').fill('POL-2026');
+  await dialog.getByRole('button', { name: /POL-2026-0001/ }).click();
+  await dialog.getByPlaceholder('Search contract number or cedent…').fill('CTR-2026');
+  await dialog.getByRole('button', { name: /CTR-2026-0001/ }).click();
+  await expect(dialog.getByRole('link', { name: 'Open policy record' })).toHaveAttribute(
+    'href',
+    '/policy?record=33333333-3333-7333-8333-333333333333'
+  );
+  await expect(dialog.getByRole('link', { name: 'Open cession contract record' })).toHaveAttribute(
+    'href',
+    '/contract?record=44444444-4444-7444-8444-444444444444'
+  );
   await dialog.getByLabel('Ceded premium').fill('125000.5');
   await dialog.getByLabel('Ceded loss').fill('25000.25');
   await dialog.getByLabel('Currency').fill('usd');

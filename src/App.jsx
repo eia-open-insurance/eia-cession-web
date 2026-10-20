@@ -1,8 +1,11 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import './ui.css';
+import EntityPicker from './EntityPicker.jsx';
+import { navigate, recordHref } from './navigation.js';
 
 const TENANT = '11111111-1111-7111-8111-111111111111';
 const BOOK = 'DIRECT';
+const CONTRACT_BOOK = 'ASSUMED';
 
 const NEXT_STATUS = {
   OPEN: ['RULE_APPLIED', 'CANCELLED'],
@@ -16,11 +19,17 @@ const NEXT_STATUS = {
 
 const EMPTY_FORM = {
   policyId: '',
+  policyLabel: '',
+  policySecondary: '',
   cessionContractId: '',
+  contractLabel: '',
+  contractSecondary: '',
   cededPremium: '0.0000',
   cededLoss: '0.0000',
   currency: 'USD'
 };
+
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 const TABS = [
   { id: 'overview', label: 'Overview' },
@@ -164,6 +173,59 @@ async function request(path, options = {}) {
   return response.json();
 }
 
+function readUrlState() {
+  if (typeof window === 'undefined') return { record: '', create: false };
+  const params = new URLSearchParams(window.location.search);
+  return { record: params.get('record') || '', create: params.get('new') === '1' };
+}
+
+/**
+ * The remote is mounted either at the shell route (/cession) or directly at the
+ * dev-server root (/). Only treat the URL as cession state on those routes so a
+ * cross-link to /policy or /contract is not interpreted as a cession id.
+ */
+function onCessionsRoute() {
+  if (typeof window === 'undefined') return false;
+  const path = window.location.pathname.replace(/\/+$/, '');
+  return path === '' || path === '/' || path.endsWith('/cession');
+}
+
+function writeUrl({ record = '', create = false, replace = false } = {}) {
+  if (typeof window === 'undefined' || !onCessionsRoute()) return;
+  const params = new URLSearchParams();
+  if (record) params.set('record', record);
+  if (create) params.set('new', '1');
+  const query = params.toString();
+  const target = `${window.location.pathname}${query ? `?${query}` : ''}`;
+  const current = `${window.location.pathname}${window.location.search}`;
+  if (target === current) return;
+  try {
+    if (replace) window.history.replaceState({}, '', target);
+    else window.history.pushState({}, '', target);
+  } catch {
+    // URL state is an enhancement; queue selection still works without it.
+  }
+}
+
+function filterCessions(cessions, filter) {
+  const term = filter.trim().toLowerCase();
+  if (!term) return cessions;
+  return cessions.filter((cession) =>
+    [
+      cession.cessionNumber,
+      cession.policyId,
+      cession.cessionContractId,
+      cession.status,
+      humanize(cession.status)
+    ].some((value) => String(value || '').toLowerCase().includes(term))
+  );
+}
+
+function openRecord(event) {
+  event.preventDefault();
+  navigate(event.currentTarget.getAttribute('href'));
+}
+
 function Field({ label: text, children, className = '' }) {
   return (
     <label className={`eia-field ${className}`.trim()}>
@@ -244,8 +306,15 @@ export default function App() {
   const [transitionBusy, setTransitionBusy] = useState(false);
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
+  const [queueFilter, setQueueFilter] = useState('');
+
+  const cessionsRef = useRef([]);
+  const applyingUrlRef = useRef(false);
+  const createOpenRef = useRef(false);
 
   const selectedCession = cessions.find((cession) => cession.id === selectedId) || null;
+  const selectedCessionId = selectedCession?.id || null;
+  const filteredCessions = filterCessions(cessions, queueFilter);
   const currency = selectedCession?.currency || 'USD';
   const nextStatuses = selectedCession ? (NEXT_STATUS[selectedCession.status] || []) : [];
   const localTargets = nextStatuses.filter((target) => {
@@ -264,14 +333,114 @@ export default function App() {
   }
 
   useEffect(() => {
+    createOpenRef.current = createOpen;
+  }, [createOpen]);
+
+  /**
+   * Applies ?record= and ?new=1. The record is selected immediately when it is
+   * already in the queue; otherwise the detail endpoint is fetched and the
+   * cession is inserted at the top of the queue.
+   */
+  async function applyUrlState(rows, { initial = false } = {}) {
+    if (!onCessionsRoute()) return;
+    const { record, create } = readUrlState();
+
+    if (create) {
+      if (!createOpenRef.current) setForm(EMPTY_FORM);
+      setCreateOpen(true);
+      setError('');
+      return;
+    }
+
+    if (!record) {
+      if (!initial) {
+        setCreateOpen(false);
+        setError('');
+      }
+      return;
+    }
+
+    setCreateOpen(false);
+    if (applyingUrlRef.current) return;
+
+    const queue = Array.isArray(rows) && rows.length > 0 ? rows : cessionsRef.current;
+    const known = queue.find(
+      (cession) => cession.id === record || cession.cessionNumber === record
+    );
+    if (known) {
+      setSelectedId(known.id);
+      setError('');
+      return;
+    }
+
+    if (!UUID_PATTERN.test(record)) {
+      setError(`Cession “${record}” was not found in the DIRECT cession queue.`);
+      return;
+    }
+
+    applyingUrlRef.current = true;
+    try {
+      const cession = await request(`/api/v1/cessions/${record}`);
+      if (cession?.id) {
+        setCessions((current) =>
+          current.some((row) => row.id === cession.id) ? current : [cession, ...current]
+        );
+        setSelectedId(cession.id);
+        setActiveTab('overview');
+        setError('');
+      }
+    } catch (cause) {
+      setError(`Cession ${record} could not be loaded: ${cause.message}`);
+      setSelectedId((current) => current || cessionsRef.current[0]?.id || null);
+    } finally {
+      applyingUrlRef.current = false;
+    }
+  }
+
+  useEffect(() => {
+    let alive = true;
+    if (readUrlState().create && onCessionsRoute()) {
+      setForm(EMPTY_FORM);
+      setCreateOpen(true);
+    }
+
+    const onPopState = () => {
+      applyUrlState(cessionsRef.current);
+    };
+    window.addEventListener('popstate', onPopState);
+
     load()
-      .catch((cause) => setError(cause.message))
-      .finally(() => setLoading(false));
+      .then((rows) => {
+        if (!alive) return;
+        setLoading(false);
+        applyUrlState(rows, { initial: true });
+      })
+      .catch((cause) => {
+        if (!alive) return;
+        setLoading(false);
+        setError(cause.message);
+      });
+
+    return () => {
+      alive = false;
+      window.removeEventListener('popstate', onPopState);
+    };
   }, []);
 
   useEffect(() => {
+    cessionsRef.current = cessions;
     setSelectedId((current) => {
       if (current && cessions.some((cession) => cession.id === current)) return current;
+      const requested = readUrlState().record;
+      if (
+        requested &&
+        !cessions.some(
+          (cession) => cession.id === requested || cession.cessionNumber === requested
+        )
+      ) {
+        // Keep waiting for the detail lookup instead of selecting a different cession.
+        return current;
+      }
       return cessions[0]?.id || null;
     });
   }, [cessions]);
@@ -288,20 +457,40 @@ export default function App() {
       if (event.key === 'Escape' && !createBusy) {
         setCreateOpen(false);
         setError('');
+        writeUrl({ record: selectedCessionId || '' });
       }
     };
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [createOpen, createBusy]);
+  }, [createOpen, createBusy, selectedCessionId]);
 
   function update(field) {
     return (event) => setForm((current) => ({ ...current, [field]: event.target.value }));
+  }
+
+  function selectPolicy(id, item) {
+    setForm((current) => ({
+      ...current,
+      policyId: id,
+      policyLabel: item?.label || '',
+      policySecondary: item?.secondary || ''
+    }));
+  }
+
+  function selectContract(id, item) {
+    setForm((current) => ({
+      ...current,
+      cessionContractId: id,
+      contractLabel: item?.label || '',
+      contractSecondary: item?.secondary || ''
+    }));
   }
 
   function selectCession(cession) {
     if (cession.id !== selectedId) setSelectedId(cession.id);
     setError('');
     setNotice('');
+    writeUrl({ record: cession.id });
   }
 
   async function refresh() {
@@ -318,18 +507,25 @@ export default function App() {
     setError('');
     setNotice('');
     setCreateOpen(true);
+    writeUrl({ create: true });
   }
 
   function closeCreate() {
     if (createBusy) return;
     setCreateOpen(false);
     setError('');
+    writeUrl({ record: selectedCessionId || '' });
   }
 
   async function submitCreate(event) {
     event.preventDefault();
-    setCreateBusy(true);
     setError('');
+    if (!form.policyId || !form.cessionContractId) {
+      setError('Select a DIRECT policy and an ASSUMED cession contract before creating the cession.');
+      return;
+    }
+
+    setCreateBusy(true);
     try {
       const created = await request('/api/v1/cessions', {
         method: 'POST',
@@ -344,7 +540,10 @@ export default function App() {
       setForm(EMPTY_FORM);
       setCreateOpen(false);
       await load();
-      if (created?.id) setSelectedId(created.id);
+      if (created?.id) {
+        setSelectedId(created.id);
+        writeUrl({ record: created.id });
+      }
       setActiveTab('overview');
       setNotice(
         created?.cessionNumber
@@ -436,35 +635,76 @@ export default function App() {
       {error && !createOpen && <p role="alert" style={{ margin: '0 0 12px' }}>{error}</p>}
 
       <div className="eia-record-layout">
-        <aside className="eia-record-list" aria-label="Cession queue">
-          <div className="eia-record-list-head">
-            <strong>Cession queue</strong>
-            <span className="eia-muted">{loading ? '…' : cessions.length}</span>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 8, minWidth: 0 }}>
+          <div
+            className="eia-queue-search"
+            role="search"
+            aria-label="Filter the cession queue"
+            style={{ display: 'flex', alignItems: 'center', gap: 6 }}
+          >
+            <div className="eia-search-box" style={{ height: 38, flex: 1 }}>
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                <circle cx="11" cy="11" r="7" stroke="currentColor" strokeWidth="2" />
+                <path d="m20 20-3.4-3.4" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+              </svg>
+              <input
+                type="search"
+                value={queueFilter}
+                onChange={(event) => setQueueFilter(event.target.value)}
+                placeholder="Filter cessions by number, policy, contract, or status…"
+                aria-label="Filter cessions by number, policy, contract, or status"
+                autoComplete="off"
+                data-testid="cession-filter"
+              />
+            </div>
+            {queueFilter && (
+              <button type="button" className="eia-btn-ghost" onClick={() => setQueueFilter('')}>
+                Clear
+              </button>
+            )}
           </div>
-          {cessions.map((cession) => (
-            <button
-              key={cession.id}
-              type="button"
-              className={cession.id === selectedId ? 'selected' : ''}
-              aria-current={cession.id === selectedId ? 'true' : undefined}
-              onClick={() => selectCession(cession)}
-            >
-              <span className="record-primary">{cession.cessionNumber}</span>
-              <span className="record-secondary">Policy {shortId(cession.policyId)}</span>
-              <span
-                className="record-secondary"
-                style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}
-              >
-                <span className={`eia-pill ${statusTone(cession.status)}`}>{cession.status}</span>
-                <span>{money(cession.cededPremium, cession.currency || 'USD')}</span>
+
+          <aside className="eia-record-list" aria-label="Cession queue">
+            <div className="eia-record-list-head">
+              <strong>Cession queue</strong>
+              <span className="eia-muted" data-testid="cession-queue-count">
+                {loading
+                  ? '…'
+                  : queueFilter
+                    ? `${filteredCessions.length} of ${cessions.length}`
+                    : cessions.length}
               </span>
-            </button>
-          ))}
-          {!loading && cessions.length === 0 && (
-            <div className="empty">No cession cases on the DIRECT book yet.</div>
-          )}
-          {loading && <div className="empty">Loading the DIRECT cession queue…</div>}
-        </aside>
+            </div>
+            {filteredCessions.map((cession) => (
+              <button
+                key={cession.id}
+                type="button"
+                className={cession.id === selectedId ? 'selected' : ''}
+                aria-current={cession.id === selectedId ? 'true' : undefined}
+                onClick={() => selectCession(cession)}
+              >
+                <span className="record-primary">{cession.cessionNumber}</span>
+                <span className="record-secondary">Policy {shortId(cession.policyId)}</span>
+                <span
+                  className="record-secondary"
+                  style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}
+                >
+                  <span className={`eia-pill ${statusTone(cession.status)}`}>{cession.status}</span>
+                  <span>{money(cession.cededPremium, cession.currency || 'USD')}</span>
+                </span>
+              </button>
+            ))}
+            {!loading && cessions.length > 0 && filteredCessions.length === 0 && (
+              <div className="empty">
+                No cessions match “{queueFilter.trim()}”. Clear the filter to see the full queue.
+              </div>
+            )}
+            {!loading && cessions.length === 0 && (
+              <div className="empty">No cession cases on the DIRECT book yet.</div>
+            )}
+            {loading && <div className="empty">Loading the DIRECT cession queue…</div>}
+          </aside>
+        </div>
 
         <section className="eia-record-panel" aria-label="Cession record">
           {!selectedCession ? (
@@ -591,9 +831,39 @@ export default function App() {
                         <dt>Business book</dt>
                         <dd><span className="eia-badge direct">DIRECT</span></dd>
                         <dt>Policy</dt>
-                        <dd className="eia-mono">{selectedCession.policyId || '—'}</dd>
+                        <dd>
+                          {selectedCession.policyId ? (
+                            <>
+                              <a
+                                href={recordHref('policy', selectedCession.policyId)}
+                                onClick={openRecord}
+                                data-testid="overview-policy-link"
+                              >
+                                Open policy record
+                              </a>
+                              <span className="eia-mono" style={{ marginLeft: 6 }}>
+                                {shortId(selectedCession.policyId)}
+                              </span>
+                            </>
+                          ) : '—'}
+                        </dd>
                         <dt>Ceded contract</dt>
-                        <dd className="eia-mono">{selectedCession.cessionContractId || '—'}</dd>
+                        <dd>
+                          {selectedCession.cessionContractId ? (
+                            <>
+                              <a
+                                href={recordHref('contract', selectedCession.cessionContractId)}
+                                onClick={openRecord}
+                                data-testid="overview-contract-link"
+                              >
+                                Open cession contract record
+                              </a>
+                              <span className="eia-mono" style={{ marginLeft: 6 }}>
+                                {shortId(selectedCession.cessionContractId)}
+                              </span>
+                            </>
+                          ) : '—'}
+                        </dd>
                         <dt>Currency</dt>
                         <dd>{currency}</dd>
                         <dt>Version</dt>
@@ -655,6 +925,48 @@ export default function App() {
                       </p>
                     </section>
                   </div>
+
+                  <section className="eia-context-panel" aria-label="Why this matters">
+                    <h4>Why this matters</h4>
+                    <p>
+                      A cession is the DIRECT-book outward reinsurance record for a policy: the expected
+                      ceded premium and loss, the cession lifecycle, and the FS-RI hand-off. The policy
+                      and contract are owned upstream and linked here, not edited on the cession. SAP FS-RI
+                      owns the actual ceded amounts, recoverables, and statements, so
+                      the FS-RI hand-off is the operative step that moves the case into that system of
+                      record.
+                    </p>
+                    <div className="links">
+                      {selectedCession.policyId && (
+                        <a
+                          href={recordHref('policy', selectedCession.policyId)}
+                          onClick={openRecord}
+                          data-testid="why-policy-link"
+                        >
+                          Policy record
+                        </a>
+                      )}
+                      {selectedCession.cessionContractId && (
+                        <a
+                          href={recordHref('contract', selectedCession.cessionContractId)}
+                          onClick={openRecord}
+                          data-testid="why-contract-link"
+                        >
+                          Cession contract record
+                        </a>
+                      )}
+                      <a
+                        href="#cession-panel-handoff"
+                        onClick={(event) => {
+                          event.preventDefault();
+                          setActiveTab('handoff');
+                        }}
+                        data-testid="why-handoff-link"
+                      >
+                        Go to the FS-RI hand-off
+                      </a>
+                    </div>
+                  </section>
                 </section>
               )}
 
@@ -759,8 +1071,8 @@ export default function App() {
               <div>
                 <h2 id="create-cession-title" style={{ margin: 0 }}>Create cession</h2>
                 <p className="eia-record-subtitle">
-                  Create a cession case for a DIRECT policy and ceded contract. The request is walled
-                  to the DIRECT book.
+                  Create a cession case for a DIRECT policy and an ASSUMED cession contract. The cession
+                  request itself is walled to the DIRECT book.
                 </p>
               </div>
               <button
@@ -774,24 +1086,51 @@ export default function App() {
             </div>
 
             <form className="eia-form-grid" onSubmit={submitCreate} style={{ marginTop: 16 }}>
-              <Field label="Policy ID" className="span-2">
-                <input
-                  id="policyId"
+              <Field label="Policy" className="span-2">
+                <EntityPicker
+                  endpoint="/api/v1/policies/search"
+                  book={BOOK}
                   value={form.policyId}
-                  onChange={update('policyId')}
-                  placeholder="Policy UUID"
-                  required
-                  autoFocus
+                  valueLabel={form.policyLabel}
+                  onChange={selectPolicy}
+                  placeholder="Search policy number or product…"
+                  disabled={createBusy}
                 />
+                {form.policyId && (
+                  <span className="eia-picker-hint">
+                    {form.policySecondary || 'Policy selected'} ·{' '}
+                    <a
+                      href={recordHref('policy', form.policyId)}
+                      onClick={openRecord}
+                      data-testid="create-policy-link"
+                    >
+                      Open policy record
+                    </a>
+                  </span>
+                )}
               </Field>
-              <Field label="Ceded contract ID">
-                <input
-                  id="cessionContractId"
+              <Field label="Cession contract">
+                <EntityPicker
+                  endpoint="/api/v1/contracts/search"
+                  book={CONTRACT_BOOK}
                   value={form.cessionContractId}
-                  onChange={update('cessionContractId')}
-                  placeholder="Contract UUID"
-                  required
+                  valueLabel={form.contractLabel}
+                  onChange={selectContract}
+                  placeholder="Search contract number or cedent…"
+                  disabled={createBusy}
                 />
+                {form.cessionContractId && (
+                  <span className="eia-picker-hint">
+                    {form.contractSecondary || 'Cession contract selected'} ·{' '}
+                    <a
+                      href={recordHref('contract', form.cessionContractId)}
+                      onClick={openRecord}
+                      data-testid="create-contract-link"
+                    >
+                      Open cession contract record
+                    </a>
+                  </span>
+                )}
               </Field>
               <Field label="Ceded premium">
                 <input
