@@ -41,8 +41,11 @@ cards, and Overview, FS-RI Hand-off, Status History, and Activity tabs. Cessions
 modal; the lifecycle and the FS-RI hand-off (including its reference, status, timestamp, and last
 error) remain wired to the domain API. The Activity tab reads the append-only event stream from
 `GET /api/v1/events/aggregate/{cessionId}?limit=50` and renders the case status, version, FS-RI
-hand-off, and ceded-amount facts as an event-derived timeline. The canonical `ui.css` is loaded
-through `style-loader` and `css-loader`.
+hand-off, and ceded-amount facts as an event-derived timeline. The Overview also shows related
+notifications from `GET /api/v1/notifications?sourceType=CESSION&sourceId={cessionId}` — the total
+count, the newest three deliveries, a link to each notification record, and a View all hand-off to
+the Notifications queue filtered to the cession. The canonical `ui.css` is loaded through
+`style-loader` and `css-loader`.
 
 ## Local run
 

@@ -25,6 +25,17 @@ The format is based on Keep a Changelog and the project uses Semantic Versioning
 - Playwright coverage for the aggregate path and tenant header, newest-first
   ordering and rendering, the empty state, a contained 503, the cession payload
   facts, refetching on selection, and the card refresh.
+- Related notifications on the cession **Overview**: selecting a cession fetches
+  `GET /api/v1/notifications?sourceType=CESSION&sourceId={cessionId}` with the
+  tenant header and renders the total count, the newest three messages with
+  notification link/number, subject, delivery status, and created-at, and a
+  **View all** hand-off to the Notifications queue filtered to the cession. The
+  card carries its own loading, empty, and error states, so a slow or unavailable
+  Notifications service never blocks the cession record.
+- Playwright coverage for the related-notification count and newest-three
+  preview, source-filter query and tenant header, `{items}` envelope and single
+  row, the empty state, a contained 503, an in-flight Notifications response,
+  refetching on selection, and both the record and filtered-queue links.
 
 ### Changed
 

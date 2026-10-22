@@ -2,7 +2,14 @@ import React, { useEffect, useRef, useState } from 'react';
 import './ui.css';
 import EntityPicker from './EntityPicker.jsx';
 import ActivityPanel from './ActivityPanel.jsx';
+import NotificationsPanel from './NotificationsPanel.jsx';
 import { activityEndpoint, activityItems } from './activity.js';
+import {
+  cessionNotificationCount,
+  cessionNotifications,
+  cessionNotificationsEndpoint,
+  emptyCessionNotificationsState
+} from './notifications.js';
 import { navigate, recordHref } from './navigation.js';
 
 const TENANT = '11111111-1111-7111-8111-111111111111';
@@ -176,6 +183,18 @@ async function request(path, options = {}) {
   return response.json();
 }
 
+/**
+ * The Notifications service is tenant-scoped rather than book-scoped, so this
+ * read deliberately sends only the tenant header: the DIRECT book wall that
+ * applies to cession requests does not apply to delivery artifacts.
+ */
+async function notificationRequest(path) {
+  const response = await fetch(path, { headers: { 'X-EIA-Tenant': TENANT } });
+  if (!response.ok) throw new Error(await failureMessage(response));
+  if (response.status === 204) return null;
+  return response.json();
+}
+
 function readUrlState() {
   if (typeof window === 'undefined') return { record: '', create: false };
   const params = new URLSearchParams(window.location.search);
@@ -312,6 +331,8 @@ export default function App() {
   const [queueFilter, setQueueFilter] = useState('');
   const [activity, setActivity] = useState({ items: [], loading: false, error: '' });
   const [activityNonce, setActivityNonce] = useState(0);
+  const [notifications, setNotifications] = useState(emptyCessionNotificationsState);
+  const [notificationsNonce, setNotificationsNonce] = useState(0);
 
   const cessionsRef = useRef([]);
   const applyingUrlRef = useRef(false);
@@ -485,6 +506,45 @@ export default function App() {
     };
   }, [selectedCessionId, activityNonce]);
 
+  /**
+   * Related notifications for the selected cession. Notifications are delivery
+   * artifacts owned by the Notifications vertical, so this is a read-only
+   * projection: the fetch starts after the record is on screen and owns its own
+   * loading/error state, and a slow or unavailable Notifications service never
+   * blocks or fails the cession record.
+   */
+  useEffect(() => {
+    if (!selectedCessionId) {
+      setNotifications(emptyCessionNotificationsState());
+      return undefined;
+    }
+    let cancelled = false;
+    setNotifications({ items: [], count: 0, loading: true, error: '' });
+    notificationRequest(cessionNotificationsEndpoint(selectedCessionId))
+      .then((payload) => {
+        if (cancelled) return;
+        const items = cessionNotifications(payload, selectedCessionId);
+        setNotifications({
+          items,
+          count: cessionNotificationCount(payload, items),
+          loading: false,
+          error: ''
+        });
+      })
+      .catch((cause) => {
+        if (cancelled) return;
+        setNotifications({
+          items: [],
+          count: 0,
+          loading: false,
+          error: cause.message
+        });
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedCessionId, notificationsNonce]);
+
   useEffect(() => {
     if (!createOpen) return undefined;
     const onKeyDown = (event) => {
@@ -530,6 +590,7 @@ export default function App() {
   async function refresh() {
     setError('');
     setActivityNonce((value) => value + 1);
+    setNotificationsNonce((value) => value + 1);
     try {
       await load();
     } catch (cause) {
@@ -967,6 +1028,14 @@ export default function App() {
                       </p>
                     </section>
                   </div>
+
+                  <NotificationsPanel
+                    cessionId={selectedCessionId}
+                    items={notifications.items}
+                    count={notifications.count}
+                    loading={notifications.loading}
+                    error={notifications.error}
+                  />
 
                   <section className="eia-context-panel" aria-label="Why this matters">
                     <h4>Why this matters</h4>
